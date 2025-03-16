@@ -1,0 +1,350 @@
+{
+  "name": "Lego.com - Sitemap Supabase insert flow (Updated)",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://www.lego.com/sitemap-products_nl_NL0.xml",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "f6627c21-035f-4598-bc6c-e0479acba3ec",
+      "name": "Get Dutch Sitemap",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": {
+        "url": "https://www.lego.com/sitemap-products_en_NL0.xml",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        180
+      ],
+      "id": "6f2e322d-34e4-4f6d-8fe6-02ef29449027",
+      "name": "Get English Sitemap",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "lego_url_set_scrape",
+        "returnAll": true,
+        "filterType": "none"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        0,
+        360
+      ],
+      "id": "ebf3a62c-eb04-4dde-ba13-e28a23b26adc",
+      "name": "Get Existing Products",
+      "credentials": {
+        "supabaseApi": {
+          "id": "SgPxJElhTwCL12ca",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Access all input items from the \"Get Existing Products\" node\nconst existingProducts = $input.all();\nconst productIdSet = {};\n\n// Iterate through products and extract product IDs\nexistingProducts.forEach(product => {\n  if (product.json?.product_id) {\n    productIdSet[product.json.product_id] = true;\n  }\n});\n\n// Log for debugging\nconsole.log(`Found ${Object.keys(productIdSet).length} existing product IDs`);\n\n// Return the result\nreturn { json: { existingProductIds: productIdSet } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        360,
+        360
+      ],
+      "id": "105d4835-b6a2-454d-af42-5b7f6eed46ff",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        740,
+        160
+      ],
+      "id": "8584fd7e-b49e-4677-a4b5-27833cbe8b33",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get data from nodes\nconst dutchSitemapXml = $node[\"Get Dutch Sitemap\"].json.data;\nconst englishSitemapXml = $node[\"Get English Sitemap\"].json.data;\nconst existingProductIds = $node[\"Code\"].json.existingProductIds || {};\n\n// Function to extract product IDs and URLs from XML\nfunction extractUrls(xmlString) {\n  const urlMap = {};\n  if (!xmlString) {\n    console.log(\"Warning: Empty XML string\");\n    return urlMap;\n  }\n  \n  try {\n    const urlRegex = /<url>[\\s\\S]*?<loc>([^<]+)<\\/loc>[\\s\\S]*?<\\/url>/g;\n    let match;\n    while ((match = urlRegex.exec(xmlString)) !== null) {\n      const url = match[1];\n      const productMatch = url.match(/\\/product\\/([^\\/]+)/i);\n      if (productMatch && productMatch[1]) {\n        const productId = productMatch[1];\n        urlMap[productId] = url;\n      }\n    }\n  } catch (error) {\n    console.log(\"Error extracting URLs:\", error);\n  }\n  \n  return urlMap;\n}\n\n// Process sitemaps\nconst dutchUrls = extractUrls(dutchSitemapXml);\nconst englishUrls = extractUrls(englishSitemapXml);\n\n// Initialize stats\nconst stats = {\n  dutchUrlsCount: Object.keys(dutchUrls).length,\n  englishUrlsCount: Object.keys(englishUrls).length,\n  newProductsCount: 0,\n  skippedExistingCount: 0\n};\n\nconsole.log(`Found ${stats.dutchUrlsCount} Dutch URLs and ${stats.englishUrlsCount} English URLs`);\n\n// Create new pairs\nconst newPairs = [];\nconst skippedExisting = [];\n\n// Get current timestamp for created_at and updated_at\nconst now = new Date().toISOString();\n\nfor (const productId in dutchUrls) {\n  if (englishUrls[productId]) {\n    if (!existingProductIds[productId]) {\n      // Updated to match the schema in the image\n      newPairs.push({\n        product_id: productId,\n        dutch_url: dutchUrls[productId],\n        english_url: englishUrls[productId],\n        status: \"pending\",\n        worker_id: null,\n        processing_started_at: null,\n        created_at: now,\n        updated_at: now,\n        dutch_markdown: null,\n        dutch_html: null,\n        dutch_metadata: null,\n        dutch_success: null,\n        english_markdown: null,\n        english_html: null,\n        english_metadata: null,\n        english_success: null\n      });\n      stats.newProductsCount++;\n    } else {\n      skippedExisting.push(productId);\n      stats.skippedExistingCount++;\n    }\n  }\n}\n\nconsole.log(`Found ${stats.newProductsCount} new products to add`);\nconsole.log(`Skipped ${stats.skippedExistingCount} existing products`);\n\n// Return a structured object with both products and stats\n// This makes it easier to access in the next steps\nreturn {\n  json: {\n    products: newPairs,\n    stats: stats\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        160
+      ],
+      "id": "05aa77e8-3297-40b1-852a-85401632ed89",
+      "name": "Process All Data"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.stats.newProductsCount }}",
+              "operation": "larger"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        920,
+        380
+      ],
+      "id": "fda928ab-3278-40ad-b279-a581346e0735",
+      "name": "Any New Products?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final summary message - No new products version\nconst stats = $node[\"Process All Data\"].json.stats || { dutchUrlsCount: 0, englishUrlsCount: 0, skippedExistingCount: 0, newProductsCount: 0 };\n\nreturn {\n  json: {\n    success: true,\n    message: `No new LEGO products to add. Found ${stats.dutchUrlsCount} Dutch URLs and ${stats.englishUrlsCount} English URLs. All ${stats.skippedExistingCount} matching pairs already exist in the database.`,\n    processedAt: new Date().toISOString(),\n    stats\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        560
+      ],
+      "id": "9e572322-d8fd-4356-80c7-9581092b960e",
+      "name": "No Products Summary"
+    },
+    {
+      "parameters": {
+        "tableId": "lego_url_set_scrape",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1380,
+        380
+      ],
+      "id": "86e9a5ee-c50d-49aa-bffb-6dd5a57a9807",
+      "name": "Store in Supabase",
+      "retryOnFail": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "SgPxJElhTwCL12ca",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final summary message\nconst stats = $node[\"Process All Data\"].json.stats || { newProductsCount: 0, skippedExistingCount: 0, dutchUrlsCount: 0, englishUrlsCount: 0 };\n\nreturn {\n  json: {\n    success: true,\n    message: `Successfully processed LEGO URL pairs. Added ${stats.newProductsCount} new products, skipped ${stats.skippedExistingCount} existing products.`,\n    processedAt: new Date().toISOString(),\n    stats\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        380
+      ],
+      "id": "e93b3f9e-cd22-4c04-bbcc-f3a3ea6dfff8",
+      "name": "Process Complete"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "[products]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        380
+      ],
+      "id": "23323661-ccf7-4f9d-9593-3b5f04889e1c",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 12,
+              "triggerAtMinute": 14
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -280,
+        200
+      ],
+      "id": "515410bc-74b9-49af-a338-2a8a3d3d1bc3",
+      "name": "Schedule Trigger"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Get Dutch Sitemap": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get English Sitemap": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Existing Products": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Process All Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process All Data": {
+      "main": [
+        [
+          {
+            "node": "Any New Products?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any New Products?": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Products Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Supabase": {
+      "main": [
+        [
+          {
+            "node": "Process Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Store in Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Dutch Sitemap",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get English Sitemap",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Existing Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Products Summary": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1326c978-6a95-480a-9c35-168deef76056",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0a90b3d400d903e2ce4a7c4c6de36554190e72e7c1071842cc653f847106a5c0"
+  },
+  "id": "2RJI9SxCj78bJP6Q",
+  "tags": []
+}
