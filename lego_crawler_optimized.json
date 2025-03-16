@@ -1,0 +1,300 @@
+{
+  "name": "CRAWLER 3 - LEGO.COM - FIRECRAWL (Optimized)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -5180,
+        -3600
+      ],
+      "id": "b8550d21-bd8b-4fb0-8c12-6766276c63bf",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "lego_url_set_scrape",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "dataToSend": "autoMapInputData"
+      },
+      "id": "e48457af-2a00-43e6-ac45-9b16f7187dc6",
+      "name": "Update Record",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -3140,
+        -3660
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "SgPxJElhTwCL12ca",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/claim_pending_urls_set",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"worker_id\": \"{{ $json.worker_id }}\",\n  \"batch_size\": {{ $json.batch_size }}\n}",
+        "options": {}
+      },
+      "id": "ab63bc8f-99a4-4637-adf6-cc7aca7ad65f",
+      "name": "Claim Pending URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -4460,
+        -3740
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "SgPxJElhTwCL12ca",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare for claiming pending URLs\n// Get configuration from the worker config\nconst input = $input.item.json;\n\n// Extract worker_id and other parameters from config\nconst workerId = input.worker_id || \"crawl-worker-3\"; // Fallback\nconst batchSize = input.batch_size || 1; // Fallback\nconst siteType = input.site_type || \"lego_official\"; // Fallback\n\n// Return item with the needed parameters\nreturn {\n  json: {\n    worker_id: workerId,\n    batch_size: batchSize,\n    site_type: siteType,\n    claim_time: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4680,
+        -3740
+      ],
+      "id": "25825f07-ebd1-41fd-b6c7-702e30971f3c",
+      "name": "Prepare for Claim"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"worker_id\": \"crawl-worker-3\",\n  \"site_type\": \"lego_official\",\n  \"batch_size\": 1\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4900,
+        -3660
+      ],
+      "id": "feb3f933-7ed7-4a99-82a2-3cc342301cb1",
+      "name": "Set Worker Config"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle batch of items\nconst result = [];\nconst items = $input.all();\n\n// Get worker config from input\nlet workerId, siteType;\nif (items && items.length > 0) {\n  workerId = items[0].json.worker_id || \"crawl-worker-3\";\n  siteType = items[0].json.site_type || \"lego_official\";\n} else {\n  workerId = \"crawl-worker-3\";\n  siteType = \"lego_official\";\n}\n\n// If no items found, return a default item\nif (!items || items.length === 0) {\n  return [{\n    json: {\n      found_item: false,\n      worker_id: workerId,\n      site_type: siteType\n    }\n  }];\n}\n\n// Process each item in the batch\nfor (const batchItem of items) {\n  const item = batchItem.json;\n  console.log(`Found item to process: ${item.product_id} (ID: ${item.id})`);\n  \n  // Only process Dutch if it needs scraping and has a URL\n  if (\n    (item.status === 'pending' || !item.dutch_success) && \n    item.dutch_url && \n    item.dutch_url.trim() !== ''\n  ) {\n    console.log('Will process Dutch URL:', item.dutch_url);\n    result.push({\n      json: {\n        ...item,\n        language: 'dutch',\n        url_to_crawl: item.dutch_url,\n        found_item: true,\n        worker_id: workerId,\n        site_type: siteType\n      }\n    });\n  }\n  \n  // Only process English if it needs scraping and has a URL\n  if (\n    (item.status === 'pending' || !item.english_success) && \n    item.english_url && \n    item.english_url.trim() !== ''\n  ) {\n    console.log('Will process English URL:', item.english_url);\n    result.push({\n      json: {\n        ...item,\n        language: 'english',\n        url_to_crawl: item.english_url,\n        found_item: true,\n        worker_id: workerId,\n        site_type: siteType\n      }\n    });\n  }\n}\n\n// If no languages need processing, mark as not found\nif (result.length === 0) {\n  console.log('No languages need processing for these items');\n  return [{\n    json: {\n      found_item: false,\n      worker_id: workerId,\n      site_type: siteType\n    }\n  }];\n}\n\nconsole.log(`Will process ${result.length} language(s) for this batch`);\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4240,
+        -3740
+      ],
+      "id": "8fdfbda8-a0ae-45e1-96cb-febee5e472bb",
+      "name": "Generate Language Items"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"id\": \"{{ $json.id }}\",\n  \"product_id\": \"{{ $json.product_id }}\",\n  \"language\": \"{{ $json.language }}\",\n  \"url_to_crawl\": \"{{ $json.url_to_crawl }}\",\n  \"worker_id\": \"{{ $json.worker_id }}\",\n  \"site_type\": \"{{ $json.site_type }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4020,
+        -3740
+      ],
+      "id": "43ba5da7-7aaa-42ec-9db9-b751df51bc93",
+      "name": "Set data node"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://{{ $json.worker_id }}:3002/v1/scrape",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"{{ $json.url_to_crawl }}\",\n  \"formats\": [\"markdown\", \"html\"]\n}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -3800,
+        -3740
+      ],
+      "id": "65cc0b8f-d1ff-4aa2-9e09-5bba7b57d0b5",
+      "name": "HTTP Request FIRE",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "oaRp4HdvJ9yftyZ7",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine the Edit Fields and Prepare Success Data steps\nconst dataNode = $('Set data node').item.json;\nconst httpResult = $input.item.json;\n\nconst now = new Date().toISOString();\nlet fieldPrefix = dataNode.language || \"unknown\";\n\nconst outputData = {\n  id: dataNode.id,\n  product_id: dataNode.product_id,\n  updated_at: now\n};\n\n// Set language-specific fields\nif (httpResult.success && httpResult.results && httpResult.results[0]) {\n  const result = httpResult.results[0];\n  \n  // Set HTML content if available\n  if (result.cleaned_html) {\n    outputData[`${fieldPrefix}_html`] = result.cleaned_html;\n  }\n  \n  // Set Markdown content if available\n  if (result.markdown && result.markdown.raw_markdown) {\n    outputData[`${fieldPrefix}_markdown`] = result.markdown.raw_markdown;\n  }\n  \n  // Set metadata if available\n  if (result.metadata) {\n    outputData[`${fieldPrefix}_metadata`] = result.metadata;\n  }\n  \n  // Set success flag\n  outputData[`${fieldPrefix}_success`] = true;\n}\n\nreturn {\n  json: outputData\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3580,
+        -3740
+      ],
+      "id": "2d855140-c8f2-4f2f-b9af-f8dd41507223",
+      "name": "Prepare Response Data"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Worker Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Record": {
+      "main": [
+        [
+          {
+            "node": "Set Worker Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Pending URL": {
+      "main": [
+        [
+          {
+            "node": "Generate Language Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare for Claim": {
+      "main": [
+        [
+          {
+            "node": "Claim Pending URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Worker Config": {
+      "main": [
+        [
+          {
+            "node": "Prepare for Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Language Items": {
+      "main": [
+        [
+          {
+            "node": "Set data node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set data node": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request FIRE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request FIRE": {
+      "main": [
+        [
+          {
+            "node": "Prepare Response Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Response Data": {
+      "main": [
+        [
+          {
+            "node": "Update Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "469afb3d-d264-49a6-975d-5a59cf80ae19",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0a90b3d400d903e2ce4a7c4c6de36554190e72e7c1071842cc653f847106a5c0"
+  },
+  "id": "76ObwPRzMXTujCi8",
+  "tags": []
+}
