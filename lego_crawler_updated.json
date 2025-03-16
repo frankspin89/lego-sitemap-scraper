@@ -1,0 +1,378 @@
+{
+  "name": "CRAWLER 3 - LEGO.COM - FIRECRAWL (Updated)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -5160,
+        -3195
+      ],
+      "id": "47815049-15f0-4f13-abea-56d81c841d97",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "lego_url_set_scrape",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "dataToSend": "autoMapInputData"
+      },
+      "id": "f0cd3b39-5b24-476b-b176-82e0c828cac5",
+      "name": "Update Record1",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -3400,
+        -3020
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "SgPxJElhTwCL12ca",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"id\": {{ $json.id || 'null' }},\n  \"product_id\": {{ JSON.stringify($json.product_id || '') }},\n  \"{{ $json.language || 'unknown' }}_html\": {{ JSON.stringify($json.results && $json.results[0] && $json.results[0].cleaned_html ? $json.results[0].cleaned_html : '') }},\n  \"{{ $json.language || 'unknown' }}_markdown\": {{ JSON.stringify($json.results && $json.results[0] && $json.results[0].markdown && $json.results[0].markdown.raw_markdown ? $json.results[0].markdown.raw_markdown : '') }},\n  \"{{ $json.language || 'unknown' }}_metadata\": {{ JSON.stringify($json.results && $json.results[0] && $json.results[0].metadata ? $json.results[0].metadata : {}) }},\n  \"{{ $json.language || 'unknown' }}_success\": true,\n  \"updated_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3400,
+        -3270
+      ],
+      "id": "44112ba5-8277-4bfa-adca-e410fdabef85",
+      "name": "Prepare Success Data1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/claim_pending_urls_set",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"worker_id\": \"{{ $json.worker_hostname }}\",\n  \"batch_size\": 1\n}",
+        "options": {}
+      },
+      "id": "ba83338a-c6ef-4f31-9e2d-7fb576ee78c0",
+      "name": "Claim Pending URL1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -4500,
+        -3260
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "SgPxJElhTwCL12ca",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// We need a function to claim a pending URL for processing\n// This will be done via the raw SQL in Supabase node\n\n// Get the current iteration from the current workflow context\n// If we can't get it from the current context, use a default value of 1\nlet currentIteration = 1;\nlet workerHostname = \"crawl-worker-3\"; // Default fallback\n\ntry {\n  // Try to get values from the input items if possible\n  if (items && items.length > 0 && items[0].json) {\n    if (items[0].json.iteration) {\n      currentIteration = items[0].json.iteration;\n    }\n    \n    if (items[0].json.worker_hostname) {\n      workerHostname = items[0].json.worker_hostname;\n    }\n  }\n} catch (error) {\n  console.log('Could not get values from input, using defaults');\n}\n\n// Return a dummy item to continue to the SQL node\nreturn [\n  {\n    json: {\n      worker_hostname: workerHostname,\n      iteration: currentIteration,\n      claim_time: new Date().toISOString()\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4720,
+        -3260
+      ],
+      "id": "198b75f1-7885-4149-ae89-0ddefeda59c2",
+      "name": "Prepare for Claim1"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"worker_hostname\": \"crawl-worker-3\",\n  \"site_type\": \"lego_official\",\n  \"batch_size\": 1\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4940,
+        -3195
+      ],
+      "id": "ab334052-5a71-4243-8eca-e12647f50d4f",
+      "name": "Set Worker Config1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle batch of items instead of a single item\nconst result = [];\n// API now returns an array of items\nconst items = $input.all();\nif (!items || items.length === 0) {\n  return [{\n    json: {\n      found_item: false,\n      iteration: 1,\n      worker_hostname: \"crawl-worker-3\",\n      site_type: \"lego_official\"\n    }\n  }];\n}\n// Process each item in the batch\nfor (const batchItem of items) {\n  const item = batchItem.json;\n  console.log(`Found item to process: ${item.product_id} (ID: ${item.id})`);\n  \n  const siteType = item.site_type || \"lego_official\";\n  const workerHostname = item.worker_hostname || \"crawl-worker-3\";\n  const currentIteration = item.iteration || 1;\n  \n  // Only process Dutch if it needs scraping and has a URL\n  if (\n    (item.status === 'pending' || !item.dutch_success) && \n    item.dutch_url && \n    item.dutch_url.trim() !== ''\n  ) {\n    console.log('Will process Dutch URL:', item.dutch_url);\n    result.push({\n      json: {\n        ...item,\n        language: 'dutch',\n        url_to_crawl: item.dutch_url,\n        found_item: true,\n        iteration: currentIteration,\n        worker_hostname: workerHostname,\n        site_type: siteType\n      }\n    });\n  }\n  \n  // Only process English if it needs scraping and has a URL\n  if (\n    (item.status === 'pending' || !item.english_success) && \n    item.english_url && \n    item.english_url.trim() !== ''\n  ) {\n    console.log('Will process English URL:', item.english_url);\n    result.push({\n      json: {\n        ...item,\n        language: 'english',\n        url_to_crawl: item.english_url,\n        found_item: true,\n        iteration: currentIteration,\n        worker_hostname: workerHostname,\n        site_type: siteType\n      }\n    });\n  }\n}\n// If no languages need processing, mark as not found\nif (result.length === 0) {\n  console.log('No languages need processing for these items');\n  return [{\n    json: {\n      found_item: false,\n      iteration: 1,\n      worker_hostname: \"crawl-worker-3\",\n      site_type: \"lego_official\"\n    }\n  }];\n}\nconsole.log(`Will process ${result.length} language(s) for this batch`);\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4280,
+        -3270
+      ],
+      "id": "885d4d29-e2d4-4133-afa6-a34560d797e6",
+      "name": "Generate Language Items"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"id\": \"{{ $json.id }}\",\n  \"product_id\": \"{{ $json.product_id }}\",\n  \"language\": \"{{ $json.language }}\",\n  \"url_to_crawl\": \"{{ $json.url_to_crawl }}\",\n  \"worker_hostname\": \"{{ $json.worker_hostname }}\",\n  \"site_type\": \"{{ $json.site_type }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4060,
+        -3270
+      ],
+      "id": "a802ddf1-54f6-46a7-bd6b-d5c9dcad36e1",
+      "name": "Set data node"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f0349d82-ae29-4c6a-bfbc-f12b2bd49f32",
+              "name": "success",
+              "value": "={{ $json.success }}",
+              "type": "boolean"
+            },
+            {
+              "id": "8848cffb-c106-42fa-9f9a-55c0942da308",
+              "name": "results[0]",
+              "value": "={{ $json.results[0] }}",
+              "type": "object"
+            },
+            {
+              "id": "b9b72993-d1a7-4c25-b62e-e9d02ad0cb96",
+              "name": "id",
+              "value": "={{ $('Set data node').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "fc41a2fe-56c6-4e14-b825-50354e9d2366",
+              "name": "product_id",
+              "value": "={{ $('Set data node').item.json.product_id }}",
+              "type": "string"
+            },
+            {
+              "id": "a186e36b-ce0c-4457-b26d-4f57dfd1028b",
+              "name": "language",
+              "value": "={{ $('Set data node').item.json.language }}",
+              "type": "string"
+            },
+            {
+              "id": "8bac2ed3-a87b-4def-a901-00b8776e94bd",
+              "name": "url_to_crawl",
+              "value": "={{ $('Set data node').item.json.url_to_crawl }}",
+              "type": "string"
+            },
+            {
+              "id": "be7a4b89-9fbf-48f6-8fbb-1c9251fdfb61",
+              "name": "worker_hostname",
+              "value": "={{ $('Set data node').item.json.worker_hostname }}",
+              "type": "string"
+            },
+            {
+              "id": "cbe79c20-1098-440f-b8a2-e99fac6168c7",
+              "name": "site_type",
+              "value": "={{ $('Set data node').item.json.site_type }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3620,
+        -3270
+      ],
+      "id": "87debf7a-c1b4-4995-99ef-02e0610a8ed2",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://{{ $json.worker_hostname }}:3002/v1/scrape",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"{{ $json.url_to_crawl }}\",\n  \"formats\": [\"markdown\", \"html\"]\n}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -3840,
+        -3270
+      ],
+      "id": "4626712f-ec52-4b56-8529-eb71e264e4f0",
+      "name": "HTTP Request FIRE",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "oaRp4HdvJ9yftyZ7",
+          "name": "Header Auth account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Worker Config1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Record1": {
+      "main": [
+        [
+          {
+            "node": "Set Worker Config1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Success Data1": {
+      "main": [
+        [
+          {
+            "node": "Update Record1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Pending URL1": {
+      "main": [
+        [
+          {
+            "node": "Generate Language Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare for Claim1": {
+      "main": [
+        [
+          {
+            "node": "Claim Pending URL1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Worker Config1": {
+      "main": [
+        [
+          {
+            "node": "Prepare for Claim1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Language Items": {
+      "main": [
+        [
+          {
+            "node": "Set data node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set data node": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request FIRE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Prepare Success Data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request FIRE": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "92358aee-51bb-4794-a359-3696b3d7b17f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0a90b3d400d903e2ce4a7c4c6de36554190e72e7c1071842cc653f847106a5c0"
+  },
+  "id": "76ObwPRzMXTujCi8",
+  "tags": []
+}
